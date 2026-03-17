@@ -1,48 +1,12 @@
 import argparse
 import os
-import re
-import difflib
 from pathlib import Path
-
-def clean_title(filename: str) -> str:
-    """
-    Removes the file extension and anything inside () or [] brackets
-    to get the clean base title for fuzzy matching.
-    """
-    # Remove the extension
-    name = Path(filename).stem
-    # Remove text in parentheses and brackets, then strip extra whitespace
-    clean = re.sub(r'\(.*?\)|\[.*?\]', '', name).strip()
-    return clean
-
-def find_suggestion(missing_file_path: Path, expected_dir: Path) -> str:
-    """
-    Looks in the expected directory for a file with a similar base name.
-    """
-    if not expected_dir.exists():
-        return None
-    
-    # Get all valid files in the expected directory (ignore macOS hidden files)
-    available_files = [f.name for f in expected_dir.iterdir() if f.is_file() and not f.name.startswith('._')]
-    if not available_files:
-        return None
-
-    missing_clean = clean_title(missing_file_path.name)
-    
-    # Map cleaned available titles to their actual filenames
-    clean_to_actual = {clean_title(f): f for f in available_files}
-    
-    # Find the closest match using difflib (0.6 cutoff means it needs to be 60% similar)
-    matches = difflib.get_close_matches(missing_clean, clean_to_actual.keys(), n=1, cutoff=0.6)
-    
-    if matches:
-        return clean_to_actual[matches[0]]
-    return None
+from utils import find_suggestion
 
 def resolve_rom_path(cfg_path_str: str, roms_dir: Path) -> Path:
     """
     Attempts to map a path from the ES-DE collection file to the actual
-    ROM directory on the mounted drive, handling specific ES-DE variables.
+    ROM directory, handling specific ES-DE variables.
     """
     if cfg_path_str.startswith("%ROMPATH%/"):
         relative_path = cfg_path_str[10:] 
@@ -65,22 +29,22 @@ def resolve_rom_path(cfg_path_str: str, roms_dir: Path) -> Path:
             return original_path
         return roms_dir.parent / original_path
 
+def verify_collections(esde_dir: str, roms_dir: str, auto_replace: bool):
+    esde_path = Path(esde_dir).resolve()
+    roms_path = Path(roms_dir).resolve()
+    
+    collections_dir = esde_path / "collections"
 
-def verify_collections(root_dir: str, auto_replace: bool):
-    root_path = Path(root_dir).resolve()
-    collections_dir = root_path / "es-de" / "collections"
-    roms_dir = root_path / "ROMs"
-
-    if not root_path.exists():
-        print(f"❌ Error: Root directory not found at '{root_path}'")
+    if not esde_path.exists():
+        print(f"❌ Error: ES-DE directory not found at '{esde_path}'")
         return
 
     if not collections_dir.exists():
         print(f"❌ Error: Collections directory not found at '{collections_dir}'")
         return
 
-    if not roms_dir.exists():
-        print(f"❌ Error: ROMs directory not found at '{roms_dir}'")
+    if not roms_path.exists():
+        print(f"❌ Error: ROMs directory not found at '{roms_path}'")
         return
 
     cfg_files = list(collections_dir.glob("*.cfg"))
@@ -90,7 +54,7 @@ def verify_collections(root_dir: str, auto_replace: bool):
 
     valid_cfg_files = [f for f in cfg_files if not f.name.startswith("._")]
 
-    print(f"🔍 Searching for ROMs in: {roms_dir}")
+    print(f"🔍 Searching for ROMs in: {roms_path}")
     print(f"📂 Found {len(valid_cfg_files)} collection(s). Starting verification...\n")
     if auto_replace:
         print("⚠️  AUTO-REPLACE IS ON. Files will be modified automatically.\n")
@@ -125,7 +89,7 @@ def verify_collections(root_dir: str, auto_replace: bool):
             valid_entries_count += 1
             total_roms += 1
             
-            actual_path = resolve_rom_path(stripped_line, roms_dir)
+            actual_path = resolve_rom_path(stripped_line, roms_path)
             
             if not actual_path.exists():
                 expected_dir = actual_path.parent
@@ -163,11 +127,11 @@ def verify_collections(root_dir: str, auto_replace: bool):
                 display_path = filename if len(filename) < 60 else f"...{filename[-57:]}"
                 
                 if replaced:
-                    print(f"     🔄 Replaced: {display_path} -> {suggestion}")
+                    print(f"    🔄 Replaced: {display_path} -> {suggestion}")
                 else:
-                    print(f"     - {display_path}")
+                    print(f"    - {display_path}")
                     if suggestion:
-                        print(f"       💡 Suggestion: {suggestion}")
+                        print(f"      💡 Suggestion: {suggestion}")
         else:
             if valid_entries_count == 0:
                 print("  ⚠️ Collection is empty.")
@@ -204,9 +168,16 @@ if __name__ == "__main__":
         description="Verify ES-DE collection ROMs against your actual ROMs directory."
     )
     parser.add_argument(
-        "root_dir", 
+        "--esde-dir", 
+        required=True,
         type=str, 
-        help="The root path to your Ayaneo setup (e.g., /Volumes/SD/ayaneo)"
+        help="The path to your es-de configuration directory (containing collections/)"
+    )
+    parser.add_argument(
+        "--roms-dir", 
+        required=True,
+        type=str, 
+        help="The path to your actual ROMs directory"
     )
     parser.add_argument(
         "--replace", 
@@ -215,4 +186,4 @@ if __name__ == "__main__":
     )
     
     args = parser.parse_args()
-    verify_collections(args.root_dir, args.replace)
+    verify_collections(args.esde_dir, args.roms_dir, args.replace)
